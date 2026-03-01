@@ -12,8 +12,7 @@ import holidays
 st.set_page_config(page_title="스마트 가계부", page_icon="💰", layout="wide")
 
 # 🌟 [매우 중요!] Supabase 접속 주소 
-DB_URL = "postgresql://postgres.bvuvpldyifeficrfontn:eodud69rldud71dudtnr73@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres"
-
+DB_URL = st.secrets["DB_URL"]
 # ==========================================
 # 🔒 보안 로그인 시스템
 # ==========================================
