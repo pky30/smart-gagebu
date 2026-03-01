@@ -285,7 +285,7 @@ if st.session_state.active_tab == "new":
                 if final_item.strip() == "":
                     st.warning("⚠️ '내역'을 선택하거나 입력해 주세요!")
                 else:
-                    new_amount = (new_unit_price - new_discount) * new_quantity
+                    new_amount = (new_unit_price * new_quantity) - new_discount
                     conn = psycopg2.connect(DB_URL)
                     cur = conn.cursor()
                     cur.execute("""
@@ -333,7 +333,7 @@ elif st.session_state.active_tab == "edit":
                     with col_btn2: btn_delete = st.form_submit_button("❌ 이 내역 삭제")
                         
                     if btn_update:
-                        new_amount = (edit_unit_price - edit_discount) * edit_quantity
+                        new_amount = (edit_unit_price * edit_quantity) - edit_discount
                         conn = psycopg2.connect(DB_URL)
                         cur = conn.cursor()
                         cur.execute("UPDATE ledger SET date=%s, type=%s, category=%s, item=%s, unit_price=%s, discount=%s, quantity=%s, amount=%s, memo=%s WHERE id=%s", 
