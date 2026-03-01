@@ -17,7 +17,7 @@ DB_URL = st.secrets["DB_URL"]
 # 🔒 보안 로그인 시스템
 # ==========================================
 # 사용할 비밀번호를 여기에 설정하세요!
-MY_PASSWORD = "admin" 
+MY_PASSWORD = "gagebupark" 
 
 # 접속 상태를 기억하는 공간
 if "logged_in" not in st.session_state:
