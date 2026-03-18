@@ -161,7 +161,7 @@ def toggle_tab(tab_name):
 def load_data():
     try:
         engine = create_engine(DB_URL)
-        df = pd.read_sql_query("SELECT * FROM ledger ORDER BY date DESC", engine)
+        df = pd.read_sql_query(f"SELECT * FROM ledger WHERE user_email = '{st.session_state.user.email}' ORDER BY date DESC", engine)
         return df
     except:
         return pd.DataFrame()
@@ -312,9 +312,9 @@ if st.session_state.active_tab == "new":
                     conn = psycopg2.connect(DB_URL)
                     cur = conn.cursor()
                     cur.execute("""
-                        INSERT INTO ledger (date, type, category, item, unit_price, discount, quantity, amount, memo)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (new_date.strftime("%Y-%m-%d"), new_type, final_category, final_item, new_unit_price, new_discount, new_quantity, new_amount, new_memo))
+                        INSERT INTO ledger (date, type, category, item, unit_price, discount, quantity, amount, memo, user_email)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (new_date.strftime("%Y-%m-%d"), new_type, final_category, final_item, new_unit_price, new_discount, new_quantity, new_amount, new_memo, st.session_state.user.email))
                     conn.commit()
                     conn.close()
                     st.success("✅ 성공적으로 저장되었습니다!")
