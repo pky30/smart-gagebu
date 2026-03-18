@@ -157,7 +157,6 @@ def toggle_tab(tab_name):
         st.session_state.active_tab = tab_name
 
 # 2. 클라우드 DB 연동 및 데이터 불러오기 함수
-@st.cache_data
 def load_data():
     try:
         engine = create_engine(DB_URL)
@@ -166,12 +165,13 @@ def load_data():
     except:
         return pd.DataFrame()
 
-@st.cache_data
 def load_memo_data():
     try:
         engine = create_engine(DB_URL)
-        df = pd.read_sql_query("SELECT * FROM daily_memos ORDER BY date DESC", engine)
+        df = pd.read_sql_query(f"SELECT * FROM daily_memos WHERE user_email = '{st.session_state.user.email}' ORDER BY date DESC", engine)
         return df
+    except:
+        return pd.DataFrame()
     except:
         return pd.DataFrame(columns=['date', 'memo'])
 
