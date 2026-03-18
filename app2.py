@@ -162,7 +162,7 @@ def load_data():
         engine = create_engine(DB_URL)
         df = pd.read_sql_query(f"SELECT * FROM ledger WHERE user_email = '{st.session_state.user.email}' ORDER BY date DESC", engine)
         return df
-    except:
+    except Exception as e:
         return pd.DataFrame()
 
 def load_memo_data():
@@ -170,10 +170,8 @@ def load_memo_data():
         engine = create_engine(DB_URL)
         df = pd.read_sql_query(f"SELECT * FROM daily_memos WHERE user_email = '{st.session_state.user.email}' ORDER BY date DESC", engine)
         return df
-    except:
+    except Exception as e:
         return pd.DataFrame()
-    except:
-        return pd.DataFrame(columns=['date', 'memo'])
 
 df_ledger = load_data()
 df_memos = load_memo_data()
