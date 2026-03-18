@@ -7,45 +7,68 @@ import datetime
 import plotly.express as px
 import calendar
 import holidays
+from supabase import create_client
 
 # 1. 웹 페이지 기본 설정
 st.set_page_config(page_title="스마트 가계부", page_icon="💰", layout="wide")
 
 # 🌟 [매우 중요!] Supabase 접속 주소 
 DB_URL = st.secrets["DB_URL"]
-# ==========================================
-# 🔒 보안 로그인 시스템
-# ==========================================
-# 사용할 비밀번호를 여기에 설정하세요!
-MY_PASSWORD = "gagebupark" 
+# --- [회원가입 및 로그인 화면 시작] ---
+# 1. Supabase 클라이언트 초기화 (금고에서 열쇠 꺼내기)
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-# 접속 상태를 기억하는 공간
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+supabase = init_supabase()
 
-# 로그인이 안 되어 있다면 로그인 창만 띄우고 멈춤!
-if not st.session_state.logged_in:
-    st.markdown("<br><br><br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1, 1])
+# 2. 세션(로그인 상태) 관리
+if 'user' not in st.session_state:
+    st.session_state.user = None
+
+# 3. 로그인 화면 띄우기 (로그인이 안 되어 있을 때만)
+if st.session_state.user is None:
+    st.title("🔐 스마트 가계부 로그인")
+    st.markdown("나만의 가계부를 안전하게 관리하세요.")
     
-    with col2:
-        with st.container(border=True):
-            st.markdown("<h2 style='text-align: center;'>🔒 스마트 가계부</h2>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; color: gray;'>나만의 안전한 클라우드 가계부입니다.</p>", unsafe_allow_html=True)
-            
-            with st.form("login_form"):
-                entered_pwd = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
-                submit_btn = st.form_submit_button("로그인", use_container_width=True, type="primary")
-                
-                if submit_btn:
-                    if entered_pwd == MY_PASSWORD:
-                        st.session_state.logged_in = True
-                        st.rerun()
-                    else:
-                        st.error("⚠️ 비밀번호가 일치하지 않습니다.")
-                        
-    st.stop() # 🚨 핵심: 로그인이 안 되었으면 여기서 코드를 멈춥니다.
+    tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
+    
+    with tab_login:
+        login_email = st.text_input("이메일", key="login_email")
+        login_pw = st.text_input("비밀번호", type="password", key="login_pw")
+        if st.button("로그인", use_container_width=True):
+            try:
+                response = supabase.auth.sign_in_with_password({"email": login_email, "password": login_pw})
+                st.session_state.user = response.user
+                st.success("로그인 성공!")
+                st.rerun()
+            except Exception as e:
+                st.error("로그인 실패: 이메일이나 비밀번호를 확인해주세요.")
 
+    with tab_signup:
+        st.info("비밀번호는 6자리 이상으로 설정해주세요.")
+        signup_email = st.text_input("가입할 이메일", key="signup_email")
+        signup_pw = st.text_input("비밀번호 (6자리 이상)", type="password", key="signup_pw")
+        if st.button("회원가입", use_container_width=True):
+            try:
+                response = supabase.auth.sign_up({"email": signup_email, "password": signup_pw})
+                st.success("🎉 회원가입 성공! 이제 옆의 [로그인] 탭에서 로그인해주세요.")
+            except Exception as e:
+                st.error(f"회원가입 실패: {e}")
+                
+    st.stop() # 로그인이 안 되어 있으면 여기서 화면을 멈추고 가계부를 보여주지 않음
+
+# 4. 로그인 성공 시 사이드바에 환영 인사와 로그아웃 버튼 표시
+user_email = st.session_state.user.email
+st.sidebar.markdown(f"**👤 {user_email}** 님 환영합니다!")
+if st.sidebar.button("로그아웃"):
+    supabase.auth.sign_out()
+    st.session_state.user = None
+    st.rerun()
+st.sidebar.markdown("---")
+# --- [회원가입 및 로그인 화면 끝] ---
 
 # ==========================================
 # 🛠️ 클라우드 DB 초기화 (테이블 자동 생성)
