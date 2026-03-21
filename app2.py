@@ -316,7 +316,6 @@ if st.session_state.active_tab == "new":
                     conn.commit()
                     conn.close()
                     st.success("✅ 성공적으로 저장되었습니다!")
-                    load_data.clear()
                     st.rerun()
         col_empty, col_close = st.columns([6, 1])
         with col_close:
