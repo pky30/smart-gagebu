@@ -361,7 +361,6 @@ elif st.session_state.active_tab == "edit":
                         conn.commit()
                         conn.close()
                         st.success("✅ 성공적으로 수정되었습니다!")
-                        load_data.clear()
                         st.rerun()
                     if btn_delete:
                         conn = psycopg2.connect(DB_URL)
@@ -370,7 +369,6 @@ elif st.session_state.active_tab == "edit":
                         conn.commit()
                         conn.close()
                         st.success("🗑️ 성공적으로 삭제되었습니다!")
-                        load_data.clear()
                         st.rerun()
         else: st.info("조건에 맞는 거래 내역이 없어 수정/삭제할 수 없습니다.")
         col_empty, col_close = st.columns([6, 1])
