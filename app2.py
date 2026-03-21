@@ -401,7 +401,6 @@ elif st.session_state.active_tab == "memo":
                 conn.commit()
                 conn.close()
                 st.success(f"{target_date_str} 메모가 저장되었습니다!")
-                load_memo_data.clear() 
                 st.rerun()
         with memo_col2:
             st.markdown(f"**[{start_date} ~ {end_date}] 기간의 메모 목록**")
