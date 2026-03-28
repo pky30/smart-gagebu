@@ -658,23 +658,32 @@ st.markdown("---")
 st.subheader(f"📋 전체 거래 내역 (최근 기록순)")
 
 if not filtered_df.empty:
-    # 1. 월별 요약 통계 출력 (표 바로 위에 배치)
+    # 1. 월별 요약 통계 출력 (월 선택 버튼 기능 추가)
     def show_monthly_summary(target_df):
         temp_df = target_df.copy()
         temp_df['날짜_dt_temp'] = pd.to_datetime(temp_df['날짜'])
+        temp_df['연월_temp'] = temp_df['날짜_dt_temp'].dt.strftime('%Y-%m')
         
-        # 현재 시스템 날짜 기준 '이번 달' 계산
-        current_month = datetime.date.today().strftime('%Y-%m')
-        this_month_df = temp_df[temp_df['날짜_dt_temp'].dt.strftime('%Y-%m') == current_month]
+        # 현재 화면에 조회된 데이터에 존재하는 '연-월' 목록만 싹 뽑아내기 (최신순)
+        available_months = sorted(temp_df['연월_temp'].unique(), reverse=True)
+        
+        if not available_months:
+            return
+
+        # 버튼 구조로 월 선택 UI 만들기 (가로 나열)
+        selected_month = st.radio("📅 요약 통계를 확인할 월을 선택하세요:", available_months, horizontal=True)
+        
+        # 사용자가 선택한 월의 데이터만 필터링
+        this_month_df = temp_df[temp_df['연월_temp'] == selected_month]
         
         income = this_month_df[this_month_df['구분'] == '수입']['금액'].sum()
         expense = this_month_df[this_month_df['구분'] == '지출']['금액'].sum()
         
-        st.markdown(f"#### 📅 {datetime.date.today().month}월 요약 통계 (전체 내역 기준)")
+        st.markdown(f"#### 📊 {selected_month} 요약 통계")
         m_col1, m_col2, m_col3 = st.columns(3)
-        m_col1.metric("이번 달 총 수입", f"{int(income):,}원")
-        m_col2.metric("이번 달 총 지출", f"{int(expense):,}원", delta=f"-{int(expense):,}원", delta_color="inverse")
-        m_col3.metric("이번 달 순이익", f"{int(income - expense):,}원")
+        m_col1.metric("해당 월 수입", f"{int(income):,}원")
+        m_col2.metric("해당 월 지출", f"{int(expense):,}원", delta=f"-{int(expense):,}원", delta_color="inverse")
+        m_col3.metric("해당 월 순이익", f"{int(income - expense):,}원")
         st.divider()
 
     show_monthly_summary(filtered_df)
