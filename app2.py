@@ -699,8 +699,11 @@ if not filtered_df.empty:
     st.dataframe(styled_df, use_container_width=True)
 
     # 3. 엑셀 다운로드 및 인쇄 버튼 (표 바로 아래)
+    # 3. 다운로드 및 인쇄 버튼 (표 바로 아래)
     st.markdown("<br>", unsafe_allow_html=True)
-    col_btn1, col_btn2 = st.columns(2)
+    
+    # 버튼을 3개로 나누기 위해 3칸으로 설정
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
     
     with col_btn1:
         import io
@@ -709,7 +712,7 @@ if not filtered_df.empty:
             filtered_df.to_excel(writer, index=False, sheet_name='가계부내역')
         
         st.download_button(
-            label="📥 엑셀(Excel)로 다운로드",
+            label="📥 엑셀(Excel) 다운로드",
             data=buffer.getvalue(),
             file_name=f"smart_ledger_{datetime.date.today()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -717,9 +720,72 @@ if not filtered_df.empty:
         )
 
     with col_btn2:
+        import sqlite3
+        import tempfile
+        
+        # 1) 가상의 빈 .db 파일 생성
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+            tmp_path = tmp.name
+            
+        sqlite_conn = sqlite3.connect(tmp_path)
+        cur = sqlite_conn.cursor()
+        
+        # 2) PC 버전과 완벽하게 똑같은 구조로 빈 테이블 만들기 (이게 없으면 PC에서 에러남!)
+        cur.execute('''
+            CREATE TABLE ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                type TEXT,
+                category TEXT,
+                item TEXT,
+                unit_price INTEGER,
+                discount INTEGER,
+                quantity INTEGER,
+                amount INTEGER,
+                memo TEXT DEFAULT ''
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE daily_memos (
+                date TEXT PRIMARY KEY,
+                memo TEXT
+            )
+        ''')
+        sqlite_conn.commit()
+        
+        # 3) 내 이메일로 저장된 클라우드 원본 데이터 불러오기
+        raw_ledger = load_data()
+        raw_memos = load_memo_data()
+        
+        # 4) PC 버전에 필요 없는 정보(user_email 등) 덜어내기
+        pc_ledger_cols = ['id', 'date', 'type', 'category', 'item', 'unit_price', 'discount', 'quantity', 'amount', 'memo']
+        raw_ledger = raw_ledger[[c for c in raw_ledger.columns if c in pc_ledger_cols]]
+        raw_memos = raw_memos[[c for c in raw_memos.columns if c in ['date', 'memo']]]
+        
+        # 5) 데이터를 방금 만든 .db 파일에 쏟아붓기
+        if not raw_ledger.empty:
+            raw_ledger.to_sql('ledger', sqlite_conn, index=False, if_exists='append')
+        if not raw_memos.empty:
+            raw_memos.to_sql('daily_memos', sqlite_conn, index=False, if_exists='append')
+            
+        sqlite_conn.close()
+        
+        # 6) 완성된 .db 파일을 다운로드할 수 있게 읽어오기
+        with open(tmp_path, "rb") as f:
+            db_bytes = f.read()
+            
+        os.remove(tmp_path) # 다 썼으니 임시 파일 청소
+        
+        # 7) 다운로드 버튼 띄우기
+        st.download_button(
+            label="💾 PC용 DB(.db) 다운로드",
+            data=db_bytes,
+            file_name=f"ledger_backup_{datetime.date.today()}.db",
+            mime="application/octet-stream",
+            use_container_width=True
+        )
+
+    with col_btn3:
         import streamlit.components.v1 as components
         if st.button("🖨️ 화면 인쇄 / PDF 저장", use_container_width=True):
             components.html("<script>window.print();</script>", height=0)
-
-else:
-    st.info("데이터가 없습니다. 새로운 거래 내역을 작성해 보세요!")
