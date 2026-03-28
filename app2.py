@@ -89,13 +89,16 @@ def init_db():
                 discount INTEGER,
                 quantity INTEGER,
                 amount INTEGER,
-                memo TEXT
+                memo TEXT,
+                user_email VARCHAR(100) -- 이 줄을 꼭 추가하세요!
             )
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS daily_memos (
-                date DATE PRIMARY KEY,
-                memo TEXT
+                date DATE,
+                memo TEXT,
+                user_email VARCHAR(100), -- 👈 사용자 구분을 위해 추가
+                PRIMARY KEY (date, user_email) -- 👈 날짜와 사용자를 묶어서 키로 설정
             )
         """)
         conn.commit()
@@ -229,10 +232,87 @@ if calc_input.strip() != "":
         st.sidebar.error("⚠️ 올바른 수식이 아닙니다.")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔓 로그아웃 하기", use_container_width=True):
-    st.session_state.logged_in = False
-    st.rerun()
 
+# ==========================================
+# 📂 PC 버전 데이터(.db) 연동 및 가져오기
+# ==========================================
+st.sidebar.header("🔄 PC 데이터 불러오기")
+uploaded_file = st.sidebar.file_uploader(".db 파일 업로드", type=['db'])
+
+if uploaded_file is not None:
+    import sqlite3
+    import tempfile
+    
+    # 1. 업로드된 파일을 파이썬이 읽을 수 있게 임시 저장
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_path = tmp_file.name
+        
+    try:
+        # 2. SQLite 파일 열어서 데이터 꺼내기
+        sqlite_conn = sqlite3.connect(tmp_path)
+        sqlite_ledger = pd.read_sql_query("SELECT * FROM ledger", sqlite_conn)
+        
+        # 메모 테이블이 존재하는지 확인 후 가져오기
+        try:
+            sqlite_memos = pd.read_sql_query("SELECT * FROM daily_memos", sqlite_conn)
+        except:
+            sqlite_memos = pd.DataFrame() # 메모 테이블이 없으면 빈 데이터 생성
+            
+        sqlite_conn.close()
+        os.remove(tmp_path) # 다 읽었으니 임시 파일은 깨끗하게 삭제!
+        
+        # 3. Old 데이터 판별 (버전 체크)
+        if not sqlite_ledger.empty and not df_ledger.empty:
+            sqlite_max_date = pd.to_datetime(sqlite_ledger['date']).max()
+            web_max_date = pd.to_datetime(df_ledger['날짜']).max()
+            
+            # PC 데이터가 웹 데이터보다 과거일 때 경고 팝업
+            if sqlite_max_date < web_max_date:
+                st.sidebar.warning(f"⚠️ 업로드한 파일의 최신 날짜({sqlite_max_date.strftime('%Y-%m-%d')})가 현재 웹 데이터({web_max_date.strftime('%Y-%m-%d')})보다 과거(Old)입니다. 덮어쓰지 않고 빠진 데이터만 추가합니다.")
+            elif sqlite_max_date > web_max_date:
+                st.sidebar.success(f"✨ 더 최신 데이터를 발견했습니다! ({sqlite_max_date.strftime('%Y-%m-%d')})")
+            else:
+                st.sidebar.info("✅ 웹과 파일의 최신 데이터 날짜가 같습니다.")
+        
+        # 4. 데이터 병합 (중복 제외하고 클라우드로 쏙!)
+        if st.sidebar.button("데이터 병합 (클라우드에 추가)", type="primary"):
+            conn = psycopg2.connect(DB_URL)
+            cur = conn.cursor()
+            added_ledger = 0
+            added_memo = 0
+            user_email = st.session_state.user.email
+            
+            # 가계부 내역 병합 (날짜, 항목, 금액이 완전히 똑같은 건 중복으로 보고 건너뜀)
+            for _, row in sqlite_ledger.iterrows():
+                cur.execute("""
+                    SELECT 1 FROM ledger 
+                    WHERE date=%s AND item=%s AND amount=%s AND user_email=%s
+                """, (row['date'], row['item'], row['amount'], user_email))
+                
+                if not cur.fetchone(): # DB에 없는 새로운 내역일 때만 저장!
+                    cur.execute("""
+                        INSERT INTO ledger (date, type, category, item, unit_price, discount, quantity, amount, memo, user_email)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (row['date'], row['type'], row['category'], row['item'], row['unit_price'], row['discount'], row['quantity'], row['amount'], row.get('memo', ''), user_email))
+                    added_ledger += 1
+                    
+            # 일일 메모 병합 (해당 날짜에 내 메모가 없으면 추가)
+            if not sqlite_memos.empty:
+                for _, row in sqlite_memos.iterrows():
+                    cur.execute("SELECT 1 FROM daily_memos WHERE date=%s AND user_email=%s", (row['date'], user_email))
+                    if not cur.fetchone():
+                        cur.execute("INSERT INTO daily_memos (date, memo, user_email) VALUES (%s, %s, %s)", (row['date'], row['memo'], user_email))
+                        added_memo += 1
+                        
+            conn.commit()
+            conn.close()
+            st.sidebar.success(f"🎉 연동 완료! (가계부 {added_ledger}건, 메모 {added_memo}건 새로 추가됨)")
+            
+    except Exception as e:
+        st.sidebar.error(f"파일을 읽는 중 에러가 발생했습니다: {e}")
+
+st.sidebar.markdown("---")
 # ==========================================
 # 통계 대시보드
 # ==========================================
@@ -390,11 +470,19 @@ elif st.session_state.active_tab == "memo":
                 if not match_memo.empty: existing_memo_text = match_memo.iloc[0]['memo']
             new_memo = st.text_area("메모 내용", value=existing_memo_text, height=100)
             if st.button("메모 저장하기", type="primary"):
+                user_email = st.session_state.user.email # 현재 사용자 이메일
                 conn = psycopg2.connect(DB_URL)
                 cur = conn.cursor()
-                cur.execute("SELECT * FROM daily_memos WHERE date=%s", (target_date_str,))
-                if cur.fetchone(): cur.execute("UPDATE daily_memos SET memo=%s WHERE date=%s", (new_memo, target_date_str))
-                else: cur.execute("INSERT INTO daily_memos (date, memo) VALUES (%s, %s)", (target_date_str, new_memo))
+                # 1. 내 이메일로 오늘 쓴 메모가 있는지 확인
+                cur.execute("SELECT * FROM daily_memos WHERE date=%s AND user_email=%s", (target_date_str, user_email))
+                
+                if cur.fetchone(): 
+                    # 2. 있으면 덮어쓰기 (내 것만)
+                    cur.execute("UPDATE daily_memos SET memo=%s WHERE date=%s AND user_email=%s", (new_memo, target_date_str, user_email))
+                else: 
+                    # 3. 없으면 새로 만들기 (내 이메일 이름표 달고)
+                    cur.execute("INSERT INTO daily_memos (date, memo, user_email) VALUES (%s, %s, %s)", (target_date_str, new_memo, user_email))
+                
                 conn.commit()
                 conn.close()
                 st.success(f"{target_date_str} 메모가 저장되었습니다!")
@@ -563,59 +651,66 @@ elif st.session_state.active_tab == "detail_stats":
 # ==========================================
 # 화면 아래쪽: 전체 표 형태로 출력하기
 # ==========================================
+# ==========================================
+# 화면 아래쪽: 전체 표 형태로 출력하기
+# ==========================================
 st.markdown("---")
 st.subheader(f"📋 전체 거래 내역 (최근 기록순)")
 
-# --- [새로 추가할 출력/다운로드 버튼 코드 시작] ---
-import io
-import pandas as pd
-import streamlit.components.v1 as components
-
-# 버튼을 나란히 두기 위해 화면을 반으로 나눔
-col_btn1, col_btn2 = st.columns(2) 
-
-with col_btn1:
-    # 1. 엑셀 다운로드 버튼
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # 🚨 주의: 만약 본인 코드에서 표를 그릴 때 쓰는 데이터 이름이 'df'라면 아래 filtered_df를 df로 바꿔주세요!
-        filtered_df.to_excel(writer, index=False, sheet_name='가계부내역') 
-    
-    st.download_button(
-        label="📥 엑셀(Excel)로 다운로드",
-        data=buffer.getvalue(),
-        file_name="smart_ledger_data.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
-
-with col_btn2:
-    # 2. 화면 인쇄 / PDF 저장 버튼
-    components.html(
-        """
-        <button onclick="window.parent.print()" style="
-            background-color: #FF4B4B; 
-            color: white; 
-            border: none; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-size: 16px; 
-            font-weight: bold;
-            width: 100%;
-            height: 48px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        ">
-        🖨️ 화면 인쇄 / PDF 출력
-        </button>
-        """,
-        height=50
-    )
-# --- [새로 추가할 출력/다운로드 버튼 코드 끝] ---
 if not filtered_df.empty:
-    display_df = filtered_df.drop(columns=['날짜_dt', '연월', '월', '연도'], errors='ignore')
+    # 1. 월별 요약 통계 출력 (표 바로 위에 배치)
+    def show_monthly_summary(target_df):
+        temp_df = target_df.copy()
+        temp_df['날짜_dt_temp'] = pd.to_datetime(temp_df['날짜'])
+        
+        # 현재 시스템 날짜 기준 '이번 달' 계산
+        current_month = datetime.date.today().strftime('%Y-%m')
+        this_month_df = temp_df[temp_df['날짜_dt_temp'].dt.strftime('%Y-%m') == current_month]
+        
+        income = this_month_df[this_month_df['구분'] == '수입']['금액'].sum()
+        expense = this_month_df[this_month_df['구분'] == '지출']['금액'].sum()
+        
+        st.markdown(f"#### 📅 {datetime.date.today().month}월 요약 통계 (전체 내역 기준)")
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("이번 달 총 수입", f"{int(income):,}원")
+        m_col2.metric("이번 달 총 지출", f"{int(expense):,}원", delta=f"-{int(expense):,}원", delta_color="inverse")
+        m_col3.metric("이번 달 순이익", f"{int(income - expense):,}원")
+        st.divider()
+
+    show_monthly_summary(filtered_df)
+
+    # 2. 거래 내역 표 출력
+    display_cols = [c for c in filtered_df.columns if c not in ['날짜_dt', '연월', '월', '연도']]
+    display_df = filtered_df[display_cols]
+    
     search_text = f" | **검색어:** '{search_keyword}'" if search_keyword.strip() != "" else ""
     st.write(f"**조회 기간:** {start_date} ~ {end_date} | **카테고리:** {selected_category}{search_text}")
+    
     styled_df = display_df.style.set_properties(**{'text-align': 'center'})
-    st.dataframe(styled_df, width='stretch')
+    st.dataframe(styled_df, use_container_width=True)
+
+    # 3. 엑셀 다운로드 및 인쇄 버튼 (표 바로 아래)
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        import io
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            filtered_df.to_excel(writer, index=False, sheet_name='가계부내역')
+        
+        st.download_button(
+            label="📥 엑셀(Excel)로 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"smart_ledger_{datetime.date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    with col_btn2:
+        import streamlit.components.v1 as components
+        if st.button("🖨️ 화면 인쇄 / PDF 저장", use_container_width=True):
+            components.html("<script>window.print();</script>", height=0)
+
 else:
     st.info("데이터가 없습니다. 새로운 거래 내역을 작성해 보세요!")
