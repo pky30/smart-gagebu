@@ -314,22 +314,79 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 # ==========================================
-# 📊 통계 대시보드 (모바일 친화적 & 직관적 UI)
+# 📊 통계 대시보드 (모바일 친화적 & 아코디언 UI)
 # ==========================================
 st.markdown("---")
 
-# 상단 헤더 및 상세 통계 버튼 배치 (요구사항 4번)
-dash_col1, dash_col2 = st.columns([2, 1])
-with dash_col1:
-    st.subheader("📊 핵심 요약 통계")
-with dash_col2:
-    if st.button("📈 상세 통계 분석 열기/닫기", use_container_width=True):
-        if st.session_state.active_tab == "detail_stats":
-            st.session_state.active_tab = "none"
-        else:
-            st.session_state.active_tab = "detail_stats"
+st.subheader("📊 핵심 요약 통계")
 
-# 전체 / 특정 월 전환 토글 (요구사항 3번)
+# 🔥 [핵심 수정] 버튼 대신 터치하면 바로 아래로 펼쳐지는 Expander 사용!
+with st.expander("📈 상세 통계 분석 (품목별 지출 추세 보기) 터치하여 펼치기 🔽", expanded=False):
+    st.markdown("#### 📈 상세 통계 분석 (품목별 추세)")
+    expense_df = filtered_df[filtered_df['구분'] == '지출'] if not filtered_df.empty else pd.DataFrame()
+    
+    if expense_df.empty:
+        st.info("해당 기간/조건에 지출 내역이 없어 통계를 표시할 수 없습니다.")
+    else:
+        st.markdown("##### 1️⃣ 특정 품목 연간 지출 추이 (1월~12월)")
+        trend_col1, trend_col2 = st.columns([1, 2])
+        with trend_col1:
+            available_years = sorted(df_ledger['연도'].dropna().unique(), reverse=True)
+            if not available_years: available_years = [datetime.date.today().year]
+            selected_year = st.selectbox("조회할 연도", available_years)
+        with trend_col2:
+            item_list = expense_df['내역'].dropna().unique()
+            selected_trend_item = st.selectbox("추세를 확인할 품목을 선택하세요", item_list)
+        
+        months_str = [f"{m:02d}월" for m in range(1, 13)]
+        
+        if selected_trend_item:
+            base_df = pd.DataFrame({'월': months_str})
+            item_df = expense_df[(expense_df['내역'] == selected_trend_item) & (expense_df['연도'] == selected_year)]
+            trend_df = item_df.groupby('월')['금액'].sum().reset_index()
+            
+            merged_df = pd.merge(base_df, trend_df, on='월', how='left').fillna(0)
+            merged_df['품목'] = selected_trend_item 
+            
+            fig_trend1 = px.line(merged_df, x='월', y='금액', markers=True, 
+                                 title=f"{selected_year}년 '{selected_trend_item}' 지출 추이")
+            fig_trend1.update_traces(hovertemplate='<b>%{customdata[0]}</b><br><b>기간</b>: %{x}<br><b>금액</b>: %{y:,.0f}원',
+                                     customdata=merged_df[['품목']])
+            fig_trend1.update_layout(xaxis_title="월", yaxis_title="금액 (원)", yaxis_rangemode="tozero")
+            st.plotly_chart(fig_trend1, use_container_width=True)
+
+        st.markdown("---")
+        
+        st.markdown(f"##### 2️⃣ {selected_year}년 비용 상위 10개 품목의 월별 추세")
+        year_expense_df = expense_df[expense_df['연도'] == selected_year]
+        
+        if not year_expense_df.empty:
+            top_10_items = year_expense_df.groupby('내역')['금액'].sum().nlargest(10).index
+            
+            if not top_10_items.empty:
+                top10_df = year_expense_df[year_expense_df['내역'].isin(top_10_items)]
+                top10_trend = top10_df.groupby(['월', '내역'])['금액'].sum().reset_index()
+                
+                base_top10_data = []
+                for m in months_str:
+                    for item in top_10_items:
+                        base_top10_data.append({'월': m, '내역': item})
+                base_top10_df = pd.DataFrame(base_top10_data)
+                
+                merged_top10_df = pd.merge(base_top10_df, top10_trend, on=['월', '내역'], how='left').fillna(0)
+                
+                fig_trend2 = px.line(merged_top10_df, x='월', y='금액', color='내역', markers=True,
+                                     title=f"{selected_year}년 비용 상위 10개 품목 지출 추이")
+                fig_trend2.update_traces(hovertemplate='<b>품목</b>: %{customdata[0]}<br><b>월</b>: %{x}<br><b>금액</b>: %{y:,.0f}원',
+                                         customdata=merged_top10_df[['내역']])
+                fig_trend2.update_layout(xaxis_title="월", yaxis_title="금액 (원)", legend_title="상위 품목", yaxis_rangemode="tozero")
+                st.plotly_chart(fig_trend2, use_container_width=True)
+        else:
+            st.info(f"{selected_year}년에 지출 내역이 없습니다.")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# 전체 / 특정 월 전환 토글
 view_mode = st.radio("보기 모드 선택", ["전체 누적 보기", "특정 월 보기"], horizontal=True, label_visibility="collapsed")
 
 if view_mode == "특정 월 보기":
@@ -367,16 +424,13 @@ if not display_df.empty:
         with chart_col1:
             category_sum = expense_df.groupby('카테고리')['금액'].sum().reset_index()
             fig_pie = px.pie(category_sum, values='금액', names='카테고리', title='🍩 카테고리별 지출 비율', hole=0.3)
-            # 모바일 툴팁 가독성 개선 (배경 흰색 고정)
             fig_pie.update_layout(hoverlabel=dict(bgcolor="white", font_size=14, font_color="black"))
             fig_pie.update_traces(hovertemplate='<b>%{label}</b><br>금액: %{value:,.0f}원<br>비율: %{percent}')
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with chart_col2:
             daily_sum = expense_df.groupby('날짜')['금액'].sum().reset_index()
-            # 모바일 친화적 영역형(Area) 그래프로 변경
             fig_area = px.area(daily_sum, x='날짜', y='금액', title='📉 일자별 지출 흐름', markers=True)
-            # 모바일 툴팁 가독성 개선 (배경 흰색 고정)
             fig_area.update_layout(hoverlabel=dict(bgcolor="white", font_size=14, font_color="black"))
             fig_area.update_traces(
                 hovertemplate='<b>날짜</b>: %{x}<br><b>금액</b>: %{y:,.0f}원', 
@@ -386,10 +440,9 @@ if not display_df.empty:
             st.plotly_chart(fig_area, use_container_width=True)
 
 # ==========================================
-# 🎯 메인 액션 버튼 모음 (기존 위치 유지 - 5개 -> 4개로 조정)
+# 🎯 메인 액션 버튼 모음
 # ==========================================
 st.markdown("---")
-# 상세 통계 버튼이 위로 올라갔으므로 나머지 4개 버튼만 재배치
 btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
 btn_col1.button("🆕 거래내역 작성", on_click=toggle_tab, args=("new",), use_container_width=True, type="primary" if st.session_state.active_tab == "new" else "secondary")
@@ -621,78 +674,6 @@ elif st.session_state.active_tab == "cal_detail" and st.session_state.selected_c
                 st.session_state.active_tab = "calendar"
                 st.rerun()
 
-# --- 5. 📈 상세 통계 그래프 폼 ---
-elif st.session_state.active_tab == "detail_stats":
-    with st.container(border=True):
-        st.markdown("#### 📈 상세 통계 분석 (품목별 추세)")
-        expense_df = filtered_df[filtered_df['구분'] == '지출'] if not filtered_df.empty else pd.DataFrame()
-        
-        if expense_df.empty:
-            st.info("해당 기간/조건에 지출 내역이 없어 통계를 표시할 수 없습니다.")
-        else:
-            st.markdown("##### 1️⃣ 특정 품목 연간 지출 추이 (1월~12월)")
-            trend_col1, trend_col2 = st.columns([1, 2])
-            with trend_col1:
-                available_years = sorted(df_ledger['연도'].dropna().unique(), reverse=True)
-                if not available_years: available_years = [datetime.date.today().year]
-                selected_year = st.selectbox("조회할 연도", available_years)
-            with trend_col2:
-                item_list = expense_df['내역'].dropna().unique()
-                selected_trend_item = st.selectbox("추세를 확인할 품목을 선택하세요", item_list)
-            
-            months_str = [f"{m:02d}월" for m in range(1, 13)]
-            
-            if selected_trend_item:
-                base_df = pd.DataFrame({'월': months_str})
-                item_df = expense_df[(expense_df['내역'] == selected_trend_item) & (expense_df['연도'] == selected_year)]
-                trend_df = item_df.groupby('월')['금액'].sum().reset_index()
-                
-                merged_df = pd.merge(base_df, trend_df, on='월', how='left').fillna(0)
-                merged_df['품목'] = selected_trend_item 
-                
-                fig_trend1 = px.line(merged_df, x='월', y='금액', markers=True, 
-                                     title=f"{selected_year}년 '{selected_trend_item}' 지출 추이")
-                fig_trend1.update_traces(hovertemplate='<b>%{customdata[0]}</b><br><b>기간</b>: %{x}<br><b>금액</b>: %{y:,.0f}원',
-                                         customdata=merged_df[['품목']])
-                fig_trend1.update_layout(xaxis_title="월", yaxis_title="금액 (원)", yaxis_rangemode="tozero")
-                st.plotly_chart(fig_trend1, use_container_width=True)
-
-            st.markdown("---")
-            
-            st.markdown(f"##### 2️⃣ {selected_year}년 비용 상위 10개 품목의 월별 추세")
-            year_expense_df = expense_df[expense_df['연도'] == selected_year]
-            
-            if not year_expense_df.empty:
-                top_10_items = year_expense_df.groupby('내역')['금액'].sum().nlargest(10).index
-                
-                if not top_10_items.empty:
-                    top10_df = year_expense_df[year_expense_df['내역'].isin(top_10_items)]
-                    top10_trend = top10_df.groupby(['월', '내역'])['금액'].sum().reset_index()
-                    
-                    base_top10_data = []
-                    for m in months_str:
-                        for item in top_10_items:
-                            base_top10_data.append({'월': m, '내역': item})
-                    base_top10_df = pd.DataFrame(base_top10_data)
-                    
-                    merged_top10_df = pd.merge(base_top10_df, top10_trend, on=['월', '내역'], how='left').fillna(0)
-                    
-                    fig_trend2 = px.line(merged_top10_df, x='월', y='금액', color='내역', markers=True,
-                                         title=f"{selected_year}년 비용 상위 10개 품목 지출 추이")
-                    fig_trend2.update_traces(hovertemplate='<b>품목</b>: %{customdata[0]}<br><b>월</b>: %{x}<br><b>금액</b>: %{y:,.0f}원',
-                                             customdata=merged_top10_df[['내역']])
-                    fig_trend2.update_layout(xaxis_title="월", yaxis_title="금액 (원)", legend_title="상위 품목", yaxis_rangemode="tozero")
-                    st.plotly_chart(fig_trend2, use_container_width=True)
-            else:
-                st.info(f"{selected_year}년에 지출 내역이 없습니다.")
-                
-        col_empty, col_close = st.columns([6, 1])
-        with col_close:
-            if st.button("⬆️ 창 닫기", key="close_stats"): toggle_tab("detail_stats"); st.rerun()
-
-# ==========================================
-# 화면 아래쪽: 전체 표 형태로 출력하기
-# ==========================================
 # ==========================================
 # 화면 아래쪽: 전체 표 형태로 출력하기
 # ==========================================
