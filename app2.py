@@ -314,13 +314,43 @@ if uploaded_file is not None:
 
 st.sidebar.markdown("---")
 # ==========================================
-# 통계 대시보드
+# 📊 통계 대시보드 (모바일 친화적 & 직관적 UI)
 # ==========================================
 st.markdown("---")
-st.subheader("📊 요약 통계")
 
-total_income = filtered_df[filtered_df['구분'] == '수입']['금액'].sum() if not filtered_df.empty else 0
-total_expense = filtered_df[filtered_df['구분'] == '지출']['금액'].sum() if not filtered_df.empty else 0
+# 상단 헤더 및 상세 통계 버튼 배치 (요구사항 4번)
+dash_col1, dash_col2 = st.columns([2, 1])
+with dash_col1:
+    st.subheader("📊 핵심 요약 통계")
+with dash_col2:
+    if st.button("📈 상세 통계 분석 열기/닫기", use_container_width=True):
+        if st.session_state.active_tab == "detail_stats":
+            st.session_state.active_tab = "none"
+        else:
+            st.session_state.active_tab = "detail_stats"
+
+# 전체 / 특정 월 전환 토글 (요구사항 3번)
+view_mode = st.radio("보기 모드 선택", ["전체 누적 보기", "특정 월 보기"], horizontal=True, label_visibility="collapsed")
+
+if view_mode == "특정 월 보기":
+    temp_df = filtered_df.copy()
+    if not temp_df.empty:
+        temp_df['연월_temp'] = pd.to_datetime(temp_df['날짜']).dt.strftime('%Y-%m')
+        available_months = sorted(temp_df['연월_temp'].unique(), reverse=True)
+        
+        if available_months:
+            selected_month = st.selectbox("조회할 월을 선택하세요", available_months)
+            display_df = temp_df[temp_df['연월_temp'] == selected_month]
+        else:
+            display_df = filtered_df
+    else:
+        display_df = filtered_df
+else:
+    display_df = filtered_df
+
+# 상단 핵심 금액 카드
+total_income = display_df[display_df['구분'] == '수입']['금액'].sum() if not display_df.empty else 0
+total_expense = display_df[display_df['구분'] == '지출']['금액'].sum() if not display_df.empty else 0
 net_income = total_income - total_expense
 
 col1, col2, col3 = st.columns(3)
@@ -328,32 +358,44 @@ col1.metric("총 수입", f"{int(total_income):,} 원")
 col2.metric("총 지출", f"{int(total_expense):,} 원")
 col3.metric("순수익 (수입-지출)", f"{int(net_income):,} 원")
 
-if not filtered_df.empty:
-    expense_df = filtered_df[filtered_df['구분'] == '지출']
+# 그래프 영역
+if not display_df.empty:
+    expense_df = display_df[display_df['구분'] == '지출']
     if not expense_df.empty:
         chart_col1, chart_col2 = st.columns(2)
+        
         with chart_col1:
             category_sum = expense_df.groupby('카테고리')['금액'].sum().reset_index()
             fig_pie = px.pie(category_sum, values='금액', names='카테고리', title='🍩 카테고리별 지출 비율', hole=0.3)
+            # 모바일 툴팁 가독성 개선 (배경 흰색 고정)
+            fig_pie.update_layout(hoverlabel=dict(bgcolor="white", font_size=14, font_color="black"))
             fig_pie.update_traces(hovertemplate='<b>%{label}</b><br>금액: %{value:,.0f}원<br>비율: %{percent}')
             st.plotly_chart(fig_pie, use_container_width=True)
+            
         with chart_col2:
             daily_sum = expense_df.groupby('날짜')['금액'].sum().reset_index()
-            fig_bar = px.bar(daily_sum, x='날짜', y='금액', title='📉 일자별 지출 흐름')
-            fig_bar.update_traces(hovertemplate='<b>날짜</b>: %{x}<br><b>금액</b>: %{y:,.0f}원')
-            st.plotly_chart(fig_bar, use_container_width=True)
+            # 모바일 친화적 영역형(Area) 그래프로 변경
+            fig_area = px.area(daily_sum, x='날짜', y='금액', title='📉 일자별 지출 흐름', markers=True)
+            # 모바일 툴팁 가독성 개선 (배경 흰색 고정)
+            fig_area.update_layout(hoverlabel=dict(bgcolor="white", font_size=14, font_color="black"))
+            fig_area.update_traces(
+                hovertemplate='<b>날짜</b>: %{x}<br><b>금액</b>: %{y:,.0f}원', 
+                line=dict(color="#ff4b4b", width=3), 
+                fillcolor="rgba(255, 75, 75, 0.2)"
+            )
+            st.plotly_chart(fig_area, use_container_width=True)
 
 # ==========================================
-# 🎯 메인 액션 버튼 모음
+# 🎯 메인 액션 버튼 모음 (기존 위치 유지 - 5개 -> 4개로 조정)
 # ==========================================
 st.markdown("---")
-btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns(5)
+# 상세 통계 버튼이 위로 올라갔으므로 나머지 4개 버튼만 재배치
+btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
 btn_col1.button("🆕 거래내역 작성", on_click=toggle_tab, args=("new",), use_container_width=True, type="primary" if st.session_state.active_tab == "new" else "secondary")
 btn_col2.button("📝 수정 / 삭제", on_click=toggle_tab, args=("edit",), use_container_width=True, type="primary" if st.session_state.active_tab == "edit" else "secondary")
 btn_col3.button("📝 일일 메모장", on_click=toggle_tab, args=("memo",), use_container_width=True, type="primary" if st.session_state.active_tab == "memo" else "secondary")
 btn_col4.button("📆 월별 달력 보기", on_click=toggle_tab, args=("calendar",), use_container_width=True, type="primary" if st.session_state.active_tab == "calendar" else "secondary")
-btn_col5.button("📈 상세 통계 보기", on_click=toggle_tab, args=("detail_stats",), use_container_width=True, type="primary" if st.session_state.active_tab == "detail_stats" else "secondary")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
